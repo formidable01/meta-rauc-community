@@ -5,4 +5,4 @@ SRC_URI:append := "  \
 "
 
 # additional dependencies required to run RAUC on the target
-RDEPENDS:${PN} += "u-boot-fw-utils u-boot-tegra-env"
+RDEPENDS:${PN} += "u-boot-fw-utils efibootmgr "
