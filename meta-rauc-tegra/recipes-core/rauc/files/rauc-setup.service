@@ -1,0 +1,11 @@
+[Unit]
+Description=Rauc initialization and setup
+After=rauc.service
+
+[Service]
+Type=simple
+RemainAfterExit=yes
+ExecStart=/bin/sh -c '/etc/rauc/rauc_setup_and_run.sh'
+
+[Install]
+WantedBy=multi-user.target

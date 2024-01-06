@@ -1,6 +1,6 @@
 inherit bundle
 
-RAUC_BUNDLE_COMPATIBLE ?= "jetson-agx-orin-devkit"
+RAUC_BUNDLE_COMPATIBLE = "${MACHINE}"
 RAUC_BUNDLE_VERSION ?= "v2023030723"
 RAUC_BUNDLE_DESCRIPTION = "RAUC Demo Bundle"
 RAUC_BUNDLE_SLOTS ?= "rootfs" 
