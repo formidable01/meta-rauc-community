@@ -719,7 +719,7 @@
            <description> **Required.** This partition may be mounted and used to store user
               data. </description>
         </partition>
-        <partition name="overlay" type="data">
+        <partition name="eoi_shared" type="data">
             <allocation_policy> sequential </allocation_policy>
             <filesystem_type> basic </filesystem_type>
             <size> 251396096 </size> 
