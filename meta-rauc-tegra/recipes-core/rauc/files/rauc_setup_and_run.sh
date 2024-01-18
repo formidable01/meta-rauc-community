@@ -29,23 +29,23 @@
 # running the same versions
 #
 # Notes: 
-# A. The image is received and stored in /home/root/new_image as update_image.<packet_number>
-# B. The number of packets expected is stored in /home/root/new_image/expected_packets
-# C. The number of packets received so far is stored in /home/root/new_image/packet_count
-# D. The last packet numnber received is stored in /home/root/new_image/packet_number
-# E. The expected md5sum is stored in /home/root/new_image/expected_md5sum
-# F. /home/root/new_image/REBOOTED exists means the system has rebooted and is running (or should 
+# A. The image is received and stored in ${RAUC_RUN_ROOT}/new_image as update_image.<packet_number>
+# B. The number of packets expected is stored in ${RAUC_RUN_ROOT}/new_image/expected_packets
+# C. The number of packets received so far is stored in ${RAUC_RUN_ROOT}/new_image/packet_count
+# D. The last packet numnber received is stored in ${RAUC_RUN_ROOT}/new_image/packet_number
+# E. The expected md5sum is stored in ${RAUC_RUN_ROOT}/new_image/expected_md5sum
+# F. ${RAUC_RUN_ROOT}/new_image/REBOOTED exists means the system has rebooted and is running (or should 
 #    be running) a new image
-# G. /home/root/new_image/BOOTEDA exists means the system is/was running image A before last reboot
-# H. /home/root/new_image/BOOTEDB exists means the system is/was running image B before last reboot
-# I. log file in /home/root/new_image/update.log
+# G. ${RAUC_RUN_ROOT}/new_image/BOOTEDA exists means the system is/was running image A before last reboot
+# H. ${RAUC_RUN_ROOT}/new_image/BOOTEDB exists means the system is/was running image B before last reboot
+# I. log file in ${RAUC_RUN_ROOT}/new_image/update.log
 #
 # An optimization would be to have all the Orins be system aware and include a list of all
 # Orins and their IP addresses on each Orin.  This could be used for them to test the status
 # of other Orins and take action if necessary. This could be facilitated by having each Orin
 # include a file as described below
 #
-#    The list of Orins in the network is stored in /home/root/ORIN_SYSTEM_LIST. This is a CSV file
+#    The list of Orins in the network is stored in ${RAUC_RUN_ROOT}/ORIN_SYSTEM_LIST. This is a CSV file
 #    of the following structure per line
 #    <orin `hostname`>,<ip address>,<master>N
 #    The N following <master> will identify the priority selection of that orin as master
@@ -54,7 +54,9 @@
 #    This identical list will appear in all Orins; if for some reason this needs to be changed
 #    all orins will need to update their list
 #
-LOG="/home/root/rauc.log"
+RAUC_SHARED="/eoi_shared"
+RAUC_RUN_ROOT="${RAUC_SHARED}/rauc"
+LOG="${RAUC_RUN_ROOT}/rauc.log"
 #
 #
 # [UNUSED] parse and the list figure out if the slave or the master
@@ -95,12 +97,12 @@ tell_all_orins()
 echo `date` >> ${LOG}
 rauc status
 # Test if system has been initialized for use with RAUC
-if [ ! -f /home/root/INITIALIZED ]; then
+if [ ! -f ${RAUC_RUN_ROOT}/INITIALIZED ]; then
         echo -n `date` >> ${LOG}
 	echo " Initializing" >> ${LOG}
 	# ensure the directory for the new_image exists
-	if [ ! -e /home/root/new_image ]; then
-	    mkdir /home/root/new_image
+	if [ ! -e ${RAUC_RUN_ROOT}/new_image ]; then
+	    mkdir ${RAUC_RUN_ROOT}/new_image
 	fi
 	# set up "fake" UEFI entries to associate A and B labels with boot
 	# images in RAUC conf file
@@ -120,21 +122,21 @@ if [ ! -f /home/root/INITIALIZED ]; then
 	if [ ! -f /boot/extlinux/extlinux.conf.B ]; then
 	    sed 's/DEFAULT primary/DEFAULT secondary/' /boot/extlinux/extlinux.conf > /boot/extlinux/extlinux.conf.B
 	fi
-	touch /home/root/INITIALIZED
+	touch ${RAUC_RUN_ROOT}/INITIALIZED
 	ISABOOTED=$(rauc status | grep "booted" | grep "mmcblk0p1")
 	if [ "$ISABOOTED" != "" ]; then
-	    touch /home/root/BOOTEDA
+	    touch ${RAUC_RUN_ROOT}/BOOTEDA
 	    rauc status mark-good
 	fi
 	ISBBOOTED=$(rauc status | grep "booted" | grep "mmcblk0p2")
 	if [ "$ISBBOOTED" != "" ]; then
-	    touch /home/root/BOOTEDB
+	    touch ${RAUC_RUN_ROOT}/BOOTEDB
 	    rauc status mark-good
 	fi
 #	reboot
 fi
 # Test if the system has rebooted after installing a new image
-if [ -f /home/root/REBOOTED ]; then
+if [ -f ${RAUC_RUN_ROOT}/REBOOTED ]; then
         echo -n `date` >> ${LOG}
 	echo " REBOOTED!" >> ${LOG}
 	# was the install successful?
@@ -142,21 +144,21 @@ if [ -f /home/root/REBOOTED ]; then
 	# an empty string is not true
 	ISABOOTED=$(rauc status | grep "booted" | grep "mmcblk0p1")
 	# 0 if it exists; 1 if it doesn't
-	WASABOOTED=$([ -f /home/root/BOOTEDA ] ; echo $? )
+	WASABOOTED=$([ -f ${RAUC_RUN_ROOT}/BOOTEDA ] ; echo $? )
 	# Slot B
 	# an empty string is not true
 	ISBBOOTED=$(rauc status | grep "booted" | grep "mmcblk0p2")
 	# 0 if it exists; 1 if it doesn't
-	WASBBOOTED=$([ -f /home/root/BOOTEDB ] ; echo $? )
+	WASBBOOTED=$([ -f ${RAUC_RUN_ROOT}/BOOTEDB ] ; echo $? )
 	if [ "$ISABOOTED" != "" ] && [ $WASBBOOTED  == '1' ]; then
-		rm -f /home/root/BOOTEDB
-		touch /home/root/BOOTEDA
+		rm -f ${RAUC_RUN_ROOT}/BOOTEDB
+		touch ${RAUC_RUN_ROOT}/BOOTEDA
 		rauc status mark-good
 		BOOT="BOOTA"
 		tell_all_orins $BOOT
 	elif [ "$ISBBOOTED" != "" ] && [ $WASABOOTED == '1' ]; then
-		rm -f /home/root/BOOTEDA
-		touch /home/root/BOOTEDB
+		rm -f ${RAUC_RUN_ROOT}/BOOTEDA
+		touch ${RAUC_RUN_ROOT}/BOOTEDB
 		rauc status mark-good
 		BOOT="BOOTB"
 		# tell_all_orins $BOOT
@@ -167,7 +169,7 @@ if [ -f /home/root/REBOOTED ]; then
 	# if it was then let the other Orins know
 	# they should update if you are the master Orin
 	# log the event (success of fail of reboot)
-	rm -f /home/root/REBOOTED
+	rm -f ${RAUC_RUN_ROOT}/REBOOTED
 fi
 # Proceed along with the normal behavior
 while  [ 1 ]
@@ -178,18 +180,18 @@ do
 	echo " Checking for update..." >> ${LOG}
 	if [ -n "${TEST_UPDATE_PROCESS+set}" ]; then
             echo "Testing update process" >> ${LOG}
-	    if [ -f /home/root/new_image/update_image ] ; then
+	    if [ -f ${RAUC_RUN_ROOT}/new_image/update_image ] ; then
 	        # we've got a possible update file
 	        # save off the file information
-	        rauc info /home/root/new_image/update_image
+	        rauc info ${RAUC_RUN_ROOT}/new_image/update_image
 	        # install the file
-	        time rauc install /home/root/new_image/update_image
+	        time rauc install ${RAUC_RUN_ROOT}/new_image/update_image
 	        if [ $? == 0 ]; then
 		    # remove the update file
-		    rm -rf /home/root/new_image/update_image
+		    rm -rf ${RAUC_RUN_ROOT}/new_image/update_image
 	            # set up for reboot
-	            ABOOTED=$([ -f /home/root/BOOTEDA ] ; echo $? )
-	            BBOOTED=$([ -f /home/root/BOOTEDB ] ; echo $? )
+	            ABOOTED=$([ -f ${RAUC_RUN_ROOT}/BOOTEDA ] ; echo $? )
+	            BBOOTED=$([ -f ${RAUC_RUN_ROOT}/BOOTEDB ] ; echo $? )
 		    # setup to reboot eith correct image selected
 		    if [ $ABOOTED == '0' ] ; then
 		        cp /boot/extlinux/extlinux.conf.B /boot/extlinux/extlinux.conf
@@ -197,47 +199,47 @@ do
 		    if [ $BBOOTED == '0' ] ; then
 		        cp /boot/extlinux/extlinux.conf.A /boot/extlinux/extlinux.conf
 		    fi
-	            touch /home/root/REBOOTED
+	            touch ${RAUC_RUN_ROOT}/REBOOTED
 		    sync
 		    # reboot
 		else
                     echo "Install process failed" >> ${LOG}
 		    # remove the update file
-		    rm -rf /home/root/new_image/update_image
+		    rm -rf ${RAUC_RUN_ROOT}/new_image/update_image
 		    # keep waiting for a new file
 		fi
 	    else
 		echo "Nothing to update" >> ${LOG}
 	    fi
         else
-	    next_update_image = "/home/root/new_image/update_image."
+	    next_update_image = "${RAUC_RUN_ROOT}/new_image/update_image."
        	    # test to see if a new file packet has arrived
-	    while read LINE; do next_packet_number = $(echo "$LINE" | cut -f1 -d"\n"); done < /home/root/new_image/packet_number
+	    while read LINE; do next_packet_number = $(echo "$LINE" | cut -f1 -d"\n"); done < ${RAUC_RUN_ROOT}/new_image/packet_number
 	    # get the expected number of packets that should arrive in total
-	    while read LINE; do expected_packets = $(echo "$LINE" | cut -f1 -d"\n"); done < /home/root/new_image/expected_packets
+	    while read LINE; do expected_packets = $(echo "$LINE" | cut -f1 -d"\n"); done < ${RAUC_RUN_ROOT}/new_image/expected_packets
 	    # build the file name for the expected fragement
 	    next_update_image = eval "\$next_update_image\$next_packet_number"
 	    # check if the fragement has arrived
 	    if [ -f $next_update_image ]; then
 		# add the fragment to the full image file
-		cat $next_update_image >> /home/root/new_image/update_image
+		cat $next_update_image >> ${RAUC_RUN_ROOT}/new_image/update_image
 		echo "INFO: packet numbers : next_packet_number: '$next_packet_number' expected_packets: '$expected_packets'" >> ${LOG}
 		if [ $next_packet_number = $expected_packets ]; then
 			# we've got all the packets
 			# verify the md5sum
-			while read LINE; do EXPECTED_MD5SUM = $(echo "$LINE" | cut -f1 -d"\n"); done < /home/root/new_image/expected_md5sum
+			while read LINE; do EXPECTED_MD5SUM = $(echo "$LINE" | cut -f1 -d"\n"); done < ${RAUC_RUN_ROOT}/new_image/expected_md5sum
 			# calculate the checksum, grab the first field from the returned result
-			CALC_MD5SUM=$(md5sum /home/root/new_image/update_image | cut -f1 -d" ")
+			CALC_MD5SUM=$(md5sum ${RAUC_RUN_ROOT}/new_image/update_image | cut -f1 -d" ")
 		        echo "INFO: md5sum : calculated: '$CALC_MD5SUM' expected: '$EXPECTED_MD5SUM'" >> ${LOG}
 			if [ $EXPECTED_MD5SUM = $CALC_MD5SUM ]; then
 			   # we've got a good update file
 			   # save off the file information
-			   rauc info /home/root/new_image/update_image
+			   rauc info ${RAUC_RUN_ROOT}/new_image/update_image
 			   # install the file
-			   time rauc install /home/root/new_image/update_image
+			   time rauc install ${RAUC_RUN_ROOT}/new_image/update_image
 			   if [ $? == 0 ]; then
 			       # set up for reboot
-	                       touch /home/root/REBOOTED
+	                       touch ${RAUC_RUN_ROOT}/REBOOTED
 			   fi
 			else
 		           echo "ERROR: md5sum mismatch : calculated: '$CALC_MD5SUM' expected: '$EXPECTED_MD5SUM'" >> ${LOG}
@@ -245,7 +247,7 @@ do
 		else
 			# indicate the next packet number we expect to see
 			$next_packet_number = $next_packet_number + 1
-			echo $next_packet_number > /home/root/new_image/packet_number
+			echo $next_packet_number > ${RAUC_RUN_ROOT}/new_image/packet_number
 		fi
 	    fi
 	fi

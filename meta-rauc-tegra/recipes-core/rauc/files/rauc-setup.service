@@ -5,7 +5,8 @@ After=rauc.service
 [Service]
 Type=simple
 RemainAfterExit=yes
-ExecStart=/bin/sh -c '/etc/rauc/rauc_setup_and_run.sh'
+ExecStartPre=/bin/sh -c 'if [ ! -d "/eoi_shared/rauc" ]; then mkdir /eoi_shared/rauc; cp /etc/rauc/rauc_setup_and_run.sh /eoi_shared/rauc/rauc_setup_and_run.sh; fi'
+ExecStart=/bin/sh -c '/eoi_shared/rauc/rauc_setup_and_run.sh'
 
 [Install]
 WantedBy=multi-user.target
