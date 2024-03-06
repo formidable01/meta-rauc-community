@@ -201,9 +201,9 @@ do
                     echo -n `date` >> ${LOG}
 		    echo ": found update_image" >> ${LOG}
 		    # read and check md5
-		    actual = $(md5sum ${RAUC_RUN_ROOT}/new_image/update_image | awk '{print $1}')
-		    expected = $(awk '{print $1}' ${RAUC_RUN_ROOT}/new_image/update_image.md5)
-		    if [ "$actual" == "$expected" ]; then
+		    actual=$(md5sum ${RAUC_RUN_ROOT}/new_image/update_image | awk '{print $1}')
+		    expected=$(awk '{print $1}' ${RAUC_RUN_ROOT}/new_image/update_image.md5)
+		    if [ "${actual}" == "${expected}" ]; then
                         echo -n `date` >> ${LOG}
 		        echo ": starting update" >> ${LOG}
 	                # save off the file information
