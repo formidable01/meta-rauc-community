@@ -57,6 +57,7 @@
 RAUC_SHARED="/eoi_shared"
 RAUC_RUN_ROOT="${RAUC_SHARED}/rauc"
 LOG="${RAUC_RUN_ROOT}/rauc.log"
+TEST_UPDATE_PROCESS=1
 #
 #
 # [UNUSED] parse and the list figure out if the slave or the master
@@ -81,10 +82,10 @@ who_is()
 tell_all_orins()
 {
 	#$1 is "BOOTA" or "BOOTB"
-	echo "tell_all_orins() $1"
-	if [ $1 -eq "BOOTA" ]; then
+	echo "tell_all_orins() $1" >> ${LOG}
+	if [ "$1" == "BOOTA" ]; then
 		echo "BOOTA" >> ${LOG}
-	elif [ $1 -eq "BOOTB" ]; then
+	elif [ "$1" == "BOOTB" ]; then
 		echo "BOOTB" >> ${LOG}
         else
 		echo "ERROR: tell_all_orins() : BAD BOOT SPECIFIED" >> ${LOG}
@@ -95,7 +96,7 @@ tell_all_orins()
 #
 # report where we are rauc-wise
 echo `date` >> ${LOG}
-rauc status
+rauc status >> ${LOG}
 # Test if system has been initialized for use with RAUC
 if [ ! -f ${RAUC_RUN_ROOT}/INITIALIZED ]; then
         echo -n `date` >> ${LOG}
@@ -123,17 +124,6 @@ if [ ! -f ${RAUC_RUN_ROOT}/INITIALIZED ]; then
 	    sed 's/DEFAULT primary/DEFAULT secondary/' /boot/extlinux/extlinux.conf > /boot/extlinux/extlinux.conf.B
 	fi
 	touch ${RAUC_RUN_ROOT}/INITIALIZED
-	ISABOOTED=$(rauc status | grep "booted" | grep "mmcblk0p1")
-	if [ "$ISABOOTED" != "" ]; then
-	    touch ${RAUC_RUN_ROOT}/BOOTEDA
-	    rauc status mark-good
-	fi
-	ISBBOOTED=$(rauc status | grep "booted" | grep "mmcblk0p2")
-	if [ "$ISBBOOTED" != "" ]; then
-	    touch ${RAUC_RUN_ROOT}/BOOTEDB
-	    rauc status mark-good
-	fi
-#	reboot
 fi
 # Test if the system has rebooted after installing a new image
 if [ -f ${RAUC_RUN_ROOT}/REBOOTED ]; then
@@ -149,20 +139,22 @@ if [ -f ${RAUC_RUN_ROOT}/REBOOTED ]; then
 	# an empty string is not true
 	ISBBOOTED=$(rauc status | grep "booted" | grep "mmcblk0p2")
 	# 0 if it exists; 1 if it doesn't
-	WASBBOOTED=$([ -f ${RAUC_RUN_ROOT}/BOOTEDB ] ; echo $? )
-	if [ "$ISABOOTED" != "" ] && [ $WASBBOOTED  == '1' ]; then
+	if [ "$ISABOOTED" != "" ] && [ $WASBBOOTED  == 0 ]; then
+                echo "Was B...Now A" >> ${LOG}
 		rm -f ${RAUC_RUN_ROOT}/BOOTEDB
 		touch ${RAUC_RUN_ROOT}/BOOTEDA
 		rauc status mark-good
 		BOOT="BOOTA"
 		tell_all_orins $BOOT
-	elif [ "$ISBBOOTED" != "" ] && [ $WASABOOTED == '1' ]; then
+	elif [ "$ISBBOOTED" != "" ] && [ $WASABOOTED == 0 ]; then
+                echo "Was A...Now B" >> ${LOG}
 		rm -f ${RAUC_RUN_ROOT}/BOOTEDA
 		touch ${RAUC_RUN_ROOT}/BOOTEDB
 		rauc status mark-good
 		BOOT="BOOTB"
-		# tell_all_orins $BOOT
+		tell_all_orins $BOOT
 	else
+                echo "ERROR: Bad boot" >> ${LOG}
 		# we have a bad boot situation
 		rauc status mark-bad
 	fi
@@ -172,46 +164,103 @@ if [ -f ${RAUC_RUN_ROOT}/REBOOTED ]; then
 	rm -f ${RAUC_RUN_ROOT}/REBOOTED
 fi
 # Proceed along with the normal behavior
+# Here we check the system state and update
+# the status indicators
+ISABOOTED=$(rauc status | grep "booted" | grep "mmcblk0p1")
+if [ "$ISABOOTED" != "" ]; then
+    touch ${RAUC_RUN_ROOT}/BOOTEDA
+    rm -f ${RAUC_RUN_ROOT}/BOOTEDB
+    rauc status mark-good
+fi
+ISBBOOTED=$(rauc status | grep "booted" | grep "mmcblk0p2")
+if [ "$ISBBOOTED" != "" ]; then
+    touch ${RAUC_RUN_ROOT}/BOOTEDB
+    rm -f ${RAUC_RUN_ROOT}/BOOTEDA
+    rauc status mark-good
+fi
+#
 while  [ 1 ]
 do
-	# every 2 minutes - check things out
-	sleep 120
-        echo -n `date` >> ${LOG}
-	echo " Checking for update..." >> ${LOG}
+	# every minute - check things out
+	sleep 60
+#        echo -n `date` >> ${LOG}
+#	echo " Checking for update..." >> ${LOG}
 	if [ -n "${TEST_UPDATE_PROCESS+set}" ]; then
             echo "Testing update process" >> ${LOG}
-	    if [ -f ${RAUC_RUN_ROOT}/new_image/update_image ] ; then
+	    # The working assumption is that the image file is 
+	    # transferred first and then the MD5 file is moved
+	    # to this system. Because the image file is larger
+	    # we make sure it's all there before starting operations
+	    # with it
+	    if [ -f ${RAUC_RUN_ROOT}/new_image/update_image.md5 ] ; then
+                echo -n `date` >> ${LOG}
+		echo ": found update_image.md5" >> ${LOG}
 	        # we've got a possible update file
-	        # save off the file information
-	        rauc info ${RAUC_RUN_ROOT}/new_image/update_image
-	        # install the file
-	        time rauc install ${RAUC_RUN_ROOT}/new_image/update_image
-	        if [ $? == 0 ]; then
-		    # remove the update file
-		    rm -rf ${RAUC_RUN_ROOT}/new_image/update_image
-	            # set up for reboot
-	            ABOOTED=$([ -f ${RAUC_RUN_ROOT}/BOOTEDA ] ; echo $? )
-	            BBOOTED=$([ -f ${RAUC_RUN_ROOT}/BOOTEDB ] ; echo $? )
-		    # setup to reboot eith correct image selected
-		    if [ $ABOOTED == '0' ] ; then
-		        cp /boot/extlinux/extlinux.conf.B /boot/extlinux/extlinux.conf
-		    fi
-		    if [ $BBOOTED == '0' ] ; then
-		        cp /boot/extlinux/extlinux.conf.A /boot/extlinux/extlinux.conf
-		    fi
-	            touch ${RAUC_RUN_ROOT}/REBOOTED
-		    sync
-		    # reboot
+		# check for the md5 checksum
+	        if [ -f ${RAUC_RUN_ROOT}/new_image/update_image ] ; then
+                    echo -n `date` >> ${LOG}
+		    echo ": found update_image" >> ${LOG}
+		    # read and check md5
+		    actual = $(md5sum ${RAUC_RUN_ROOT}/new_image/update_image | awk '{print $1}')
+		    expected = $(awk '{print $1}' ${RAUC_RUN_ROOT}/new_image/update_image.md5)
+		    if [ "$actual" == "$expected" ]; then
+                        echo -n `date` >> ${LOG}
+		        echo ": starting update" >> ${LOG}
+	                # save off the file information
+	                rauc info ${RAUC_RUN_ROOT}/new_image/update_image >> ${LOG}
+	                # install the file
+	                time rauc install ${RAUC_RUN_ROOT}/new_image/update_image >> ${LOG}
+	                if [ $? == 0 ]; then
+		            # remove the update file
+		            rm -rf ${RAUC_RUN_ROOT}/new_image/update_image
+		            rm -rf ${RAUC_RUN_ROOT}/new_image/update_image.md5
+	                    # set up for reboot
+	                    ABOOTED=$([ -f ${RAUC_RUN_ROOT}/BOOTEDA ] ; echo $? )
+	                    BBOOTED=$([ -f ${RAUC_RUN_ROOT}/BOOTEDB ] ; echo $? )
+		            # setup to reboot eith correct image selected
+		            if [ $ABOOTED == 0 ] ; then
+		                cp /boot/extlinux/extlinux.conf.B /boot/extlinux/extlinux.conf
+		            fi
+		            if [ $BBOOTED == 0 ] ; then
+		                cp /boot/extlinux/extlinux.conf.A /boot/extlinux/extlinux.conf
+		            fi
+	                    touch ${RAUC_RUN_ROOT}/REBOOTED
+			    # A new image may require re-initialization of
+			    # boot process so we make sure that happens
+                            rm -f ${RAUC_RUN_ROOT}/INITIALIZED
+		            sync
+		            reboot
+		        else
+                            echo -n `date` >> ${LOG}
+                            echo ": Install process failed" >> ${LOG}
+		            # remove the update file
+		            rm -rf ${RAUC_RUN_ROOT}/new_image/update_image
+		            rm -rf ${RAUC_RUN_ROOT}/new_image/update_image.md5
+		            # keep waiting for a new file
+		        fi
+	            else
+                        echo -n `date` >> ${LOG}
+                        echo ": MD5 check failed" >> ${LOG}
+		        # remove the update file
+		        rm -rf ${RAUC_RUN_ROOT}/new_image/update_image
+		        rm -rf ${RAUC_RUN_ROOT}/new_image/update_image.md5
+		        # keep waiting for a new file
+		    fi    
 		else
-                    echo "Install process failed" >> ${LOG}
+                    echo -n `date` >> ${LOG}
+                    echo ": No MD5 file provided" >> ${LOG}
 		    # remove the update file
 		    rm -rf ${RAUC_RUN_ROOT}/new_image/update_image
+		    rm -rf ${RAUC_RUN_ROOT}/new_image/update_image.md5
 		    # keep waiting for a new file
-		fi
-	    else
-		echo "Nothing to update" >> ${LOG}
+                fi
+#	    else
+#		echo "Nothing to update" >> ${LOG}
 	    fi
         else
+	    # this section of code is supposed to assemble chunks of an update file
+	    # as received into a complete image suitable for actual update
+	    # TODO: it remains to to be tested and verified
 	    next_update_image = "${RAUC_RUN_ROOT}/new_image/update_image."
        	    # test to see if a new file packet has arrived
 	    while read LINE; do next_packet_number = $(echo "$LINE" | cut -f1 -d"\n"); done < ${RAUC_RUN_ROOT}/new_image/packet_number
@@ -231,7 +280,7 @@ do
 			# calculate the checksum, grab the first field from the returned result
 			CALC_MD5SUM=$(md5sum ${RAUC_RUN_ROOT}/new_image/update_image | cut -f1 -d" ")
 		        echo "INFO: md5sum : calculated: '$CALC_MD5SUM' expected: '$EXPECTED_MD5SUM'" >> ${LOG}
-			if [ $EXPECTED_MD5SUM = $CALC_MD5SUM ]; then
+			if [ "$EXPECTED_MD5SUM" == "$CALC_MD5SUM" ]; then
 			   # we've got a good update file
 			   # save off the file information
 			   rauc info ${RAUC_RUN_ROOT}/new_image/update_image
