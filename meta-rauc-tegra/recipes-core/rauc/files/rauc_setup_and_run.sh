@@ -39,6 +39,8 @@
 # G. ${RAUC_RUN_ROOT}/new_image/BOOTEDA exists means the system is/was running image A before last reboot
 # H. ${RAUC_RUN_ROOT}/new_image/BOOTEDB exists means the system is/was running image B before last reboot
 # I. log file in ${RAUC_RUN_ROOT}/new_image/update.log
+# J. The script detects if the system booted in a recovery or fallback mode  owing to a bootloader failure
+#    In this case, it reboots to a the last known good A or B inage
 #
 # An optimization would be to have all the Orins be system aware and include a list of all
 # Orins and their IP addresses on each Orin.  This could be used for them to test the status
@@ -64,13 +66,13 @@ TEST_UPDATE_PROCESS=1
 #
 who_is()
 {
-	master_or_slave = $1
+	master_or_slave=$1
 	# ip addr of this system
-	i_am = $(ifconfig -a eth0 | grep inet | cut -f2 -d':' | cut -f1 -d' ')
+	i_am=$(ifconfig -a eth0 | grep inet | cut -f2 -d':' | cut -f1 -d' ')
 	# determine active master
-	if [ $master_or_slave = "MASTER" ]; then
+	if [ "${master_or_slave}" == "MASTER" ]; then
 		echo "MASTER" >> ${LOG}
-	elif [ $master_or_slave = "SLAVE" ]; then
+	elif [ "${master_or_slave}" == "SLAVE" ]; then
 		echo "SLAVE" >> ${LOG}
 	else
 		echo "ERROR: who_is() bad argument '$master_or_slave'" >> ${LOG}
@@ -97,6 +99,61 @@ tell_all_orins()
 # report where we are rauc-wise
 echo `date` >> ${LOG}
 rauc status >> ${LOG}
+# Before doing anything determine if we have booted into a fallback mode
+# We do this by deducing how the system was booted and checking
+# if the system booted with a command line that implies fallback
+cat /proc/cmdline | grep "rauc.slot" > /dev/null
+if [ $? == 1 ]; then
+    # we are in fallback/recovery mode
+    # what side were we try1ng to boot? (A or B)
+    # Test if the system has rebooted after installing a new image
+    WASABOOTED=$([ -f ${RAUC_RUN_ROOT}/BOOTEDA ] ; echo $? )
+    WASBBOOTED=$([ -f ${RAUC_RUN_ROOT}/BOOTEDB ] ; echo $? )
+    if [ -f ${RAUC_RUN_ROOT}/REBOOTED ]; then
+        if [ $WASBBOOTED  == 0 ]; then
+            echo "New A bootloader failed - returning to B" >> ${LOG}
+	    rm -f ${RAUC_RUN_ROOT}/BOOTEDA
+	    touch ${RAUC_RUN_ROOT}/BOOTEDB
+	    cp /boot/extlinux/extlinux.conf.B /boot/extlinux/extlinux.conf
+        elif [ $WASABOOTED == 0 ]; then
+            echo "New B bootloader failed - returning to A" >> ${LOG}
+	    rm -f ${RAUC_RUN_ROOT}/BOOTEDB
+	    touch ${RAUC_RUN_ROOT}/BOOTEDA
+	    cp /boot/extlinux/extlinux.conf.A /boot/extlinux/extlinux.conf
+        else
+            echo "ERROR: Bad boot" >> ${LOG}
+	    # we have a bad boot situation
+        fi
+	rm -f ${RAUC_RUN_ROOT}/REBOOTED
+    else
+        # just a normal reboot of the active side and it failed
+        # switch to the other side
+        # if A failed go to B - if B failed go to A
+        # this behaves like a A-B switch
+        if [ $WASABOOTED  == 0 ]; then
+            echo "A bootloader failed - switching to B" >> ${LOG}
+	    rm -f ${RAUC_RUN_ROOT}/BOOTEDA
+	    touch ${RAUC_RUN_ROOT}/BOOTEDB
+	    cp /boot/extlinux/extlinux.conf.B /boot/extlinux/extlinux.conf
+        elif [ $WASBBOOTED == 0 ]; then
+	    rm -f ${RAUC_RUN_ROOT}/BOOTEDB
+	    touch ${RAUC_RUN_ROOT}/BOOTEDA
+            echo "B bootloader failed - switching to A" >> ${LOG}
+	    cp /boot/extlinux/extlinux.conf.A /boot/extlinux/extlinux.conf
+        else
+            echo "ERROR: Bad boot" >> ${LOG}
+	    # we have a bad boot situation
+        fi
+	touch ${RAUC_RUN_ROOT}/REBOOTED
+	# An image switch may require re-initialization of
+	# boot process so we make sure that happens
+        rm -f ${RAUC_RUN_ROOT}/INITIALIZED
+    fi
+    echo -n "Reboot after bootloader failure: "
+    echo `date` >> ${LOG}
+    sync
+    reboot
+fi
 # Test if system has been initialized for use with RAUC
 if [ ! -f ${RAUC_RUN_ROOT}/INITIALIZED ]; then
         echo -n `date` >> ${LOG}
@@ -139,6 +196,8 @@ if [ -f ${RAUC_RUN_ROOT}/REBOOTED ]; then
 	# an empty string is not true
 	ISBBOOTED=$(rauc status | grep "booted" | grep "mmcblk0p2")
 	# 0 if it exists; 1 if it doesn't
+	WASBBOOTED=$([ -f ${RAUC_RUN_ROOT}/BOOTEDB ] ; echo $? )
+	# 0 if it exists; 1 if it doesn't
 	if [ "$ISABOOTED" != "" ] && [ $WASBBOOTED  == 0 ]; then
                 echo "Was B...Now A" >> ${LOG}
 		rm -f ${RAUC_RUN_ROOT}/BOOTEDB
@@ -153,6 +212,24 @@ if [ -f ${RAUC_RUN_ROOT}/REBOOTED ]; then
 		rauc status mark-good
 		BOOT="BOOTB"
 		tell_all_orins $BOOT
+	elif [ "$ISABOOTED" != "" ] && [ $WASABOOTED == 0 ]; then
+                echo "Bad B...Back to A" >> ${LOG}
+		rm -f ${RAUC_RUN_ROOT}/BOOTEDB
+		touch ${RAUC_RUN_ROOT}/BOOTEDA
+		rauc status mark-good
+                # mark B bad
+		rauc status mark-bad other
+		BOOT="BOOTA"
+		tell_all_orins $BOOT
+	elif [ "$ISBBOOTED" != "" ] && [ $WASBBOOTED == 0 ]; then
+                echo "Bad A...Back to B" >> ${LOG}
+		rm -f ${RAUC_RUN_ROOT}/BOOTEDA
+		touch ${RAUC_RUN_ROOT}/BOOTEDB
+		rauc status mark-good
+                # mark A bad
+		rauc status mark-bad other
+		BOOT="BOOTB"
+		tell_all_orins $BOOT
 	else
                 echo "ERROR: Bad boot" >> ${LOG}
 		# we have a bad boot situation
@@ -162,6 +239,27 @@ if [ -f ${RAUC_RUN_ROOT}/REBOOTED ]; then
 	# they should update if you are the master Orin
 	# log the event (success of fail of reboot)
 	rm -f ${RAUC_RUN_ROOT}/REBOOTED
+fi
+#
+boot_status=$(cat /sys/devices/platform/c360000.pmc/reset_reason | awk '{print $1}')
+if [[ "$boot_status" =~ "WDT" ]]; then
+    echo -n `date` >> ${LOG}
+    echo ": WDT - bad system - reverting" >> ${LOG}
+    # set up for reboot
+    ABOOTED=$([ -f ${RAUC_RUN_ROOT}/BOOTEDA ] ; echo $? )
+    BBOOTED=$([ -f ${RAUC_RUN_ROOT}/BOOTEDB ] ; echo $? )
+    # setup to reboot eith correct image selected
+    if [ $ABOOTED == 0 ] ; then
+        cp /boot/extlinux/extlinux.conf.B /boot/extlinux/extlinux.conf
+	rauc status mark-bad
+    fi
+    if [ $BBOOTED == 0 ] ; then
+        cp /boot/extlinux/extlinux.conf.A /boot/extlinux/extlinux.conf
+	rauc status mark-bad
+    fi
+    touch ${RAUC_RUN_ROOT}/REBOOTED
+    sync
+    reboot
 fi
 # Proceed along with the normal behavior
 # Here we check the system state and update
@@ -186,7 +284,7 @@ do
 #        echo -n `date` >> ${LOG}
 #	echo " Checking for update..." >> ${LOG}
 	if [ -n "${TEST_UPDATE_PROCESS+set}" ]; then
-            echo "Testing update process" >> ${LOG}
+#           echo "Testing update process" >> ${LOG}
 	    # The working assumption is that the image file is 
 	    # transferred first and then the MD5 file is moved
 	    # to this system. Because the image file is larger
