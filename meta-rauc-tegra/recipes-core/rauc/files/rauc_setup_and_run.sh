@@ -109,22 +109,39 @@ if [ $? == 1 ]; then
     # Test if the system has rebooted after installing a new image
     WASABOOTED=$([ -f ${RAUC_RUN_ROOT}/BOOTEDA ] ; echo $? )
     WASBBOOTED=$([ -f ${RAUC_RUN_ROOT}/BOOTEDB ] ; echo $? )
+    # we will be using this directory, make sure it is empty
+    rm -rf /tmp/other
     if [ -f ${RAUC_RUN_ROOT}/REBOOTED ]; then
         if [ $WASBBOOTED  == 0 ]; then
             echo "New A bootloader failed - returning to B" >> ${LOG}
-	    rm -f ${RAUC_RUN_ROOT}/BOOTEDA
-	    touch ${RAUC_RUN_ROOT}/BOOTEDB
 	    cp /boot/extlinux/extlinux.conf.B /boot/extlinux/extlinux.conf
+	    # in case the boot chain switches we need to update the 'B' extlinux.conf, too
+	    mkdir /tmp/other
+	    mount /dev/disk/by-partlabel/B_APP /tmp/other
+	    cp /boot/extlinux/extlinux.conf.B /tmp/other/boot/extlinux/extlinux.conf
+	    # ensure the other side is consistent, for paranoia reasons
+	    cp /boot/extlinux/extlinux.conf.B /tmp/other/boot/extlinux/extlinux.conf.B
+	    cp /boot/extlinux/extlinux.conf.A /tmp/other/boot/extlinux/extlinux.conf.A
+	    umount /tmp/other
+	    rmdir /tmp/other
+	    touch ${RAUC_RUN_ROOT}/BADA
         elif [ $WASABOOTED == 0 ]; then
             echo "New B bootloader failed - returning to A" >> ${LOG}
-	    rm -f ${RAUC_RUN_ROOT}/BOOTEDB
-	    touch ${RAUC_RUN_ROOT}/BOOTEDA
 	    cp /boot/extlinux/extlinux.conf.A /boot/extlinux/extlinux.conf
+	    # in case the boot chain switches we need to update the 'A' extlinux.conf, too
+	    mkdir /tmp/other
+	    mount /dev/disk/by-partlabel/A_APP /tmp/other
+	    cp /boot/extlinux/extlinux.conf.A /tmp/other/boot/extlinux/extlinux.conf
+	    # ensure the other side is consistent, for paranoia reasons
+	    cp /boot/extlinux/extlinux.conf.B /tmp/other/boot/extlinux/extlinux.conf.B
+	    cp /boot/extlinux/extlinux.conf.A /tmp/other/boot/extlinux/extlinux.conf.A
+	    umount /tmp/other
+	    rmdir /tmp/other
+	    touch ${RAUC_RUN_ROOT}/BADB
         else
             echo "ERROR: Bad boot" >> ${LOG}
 	    # we have a bad boot situation
         fi
-	rm -f ${RAUC_RUN_ROOT}/REBOOTED
     else
         # just a normal reboot of the active side and it failed
         # switch to the other side
@@ -132,14 +149,30 @@ if [ $? == 1 ]; then
         # this behaves like a A-B switch
         if [ $WASABOOTED  == 0 ]; then
             echo "A bootloader failed - switching to B" >> ${LOG}
-	    rm -f ${RAUC_RUN_ROOT}/BOOTEDA
-	    touch ${RAUC_RUN_ROOT}/BOOTEDB
 	    cp /boot/extlinux/extlinux.conf.B /boot/extlinux/extlinux.conf
+	    # in case the boot chain switches we need to update the 'B' extlinux.conf, too
+	    mkdir /tmp/other
+	    mount /dev/disk/by-partlabel/B_APP /tmp/other
+	    cp /boot/extlinux/extlinux.conf.B /tmp/other/boot/extlinux/extlinux.conf
+	    # ensure the other side is consistent, for paranoia reasons
+	    cp /boot/extlinux/extlinux.conf.B /tmp/other/boot/extlinux/extlinux.conf.B
+	    cp /boot/extlinux/extlinux.conf.A /tmp/other/boot/extlinux/extlinux.conf.A
+	    umount /tmp/other
+	    rmdir /tmp/other
+	    touch ${RAUC_RUN_ROOT}/BADA
         elif [ $WASBBOOTED == 0 ]; then
-	    rm -f ${RAUC_RUN_ROOT}/BOOTEDB
-	    touch ${RAUC_RUN_ROOT}/BOOTEDA
             echo "B bootloader failed - switching to A" >> ${LOG}
 	    cp /boot/extlinux/extlinux.conf.A /boot/extlinux/extlinux.conf
+	    # in case the boot chain switches we need to update the 'A' extlinux.conf, too
+	    mkdir /tmp/other
+	    mount /dev/disk/by-partlabel/A_APP /tmp/other
+	    cp /boot/extlinux/extlinux.conf.A /tmp/other/boot/extlinux/extlinux.conf
+	    # ensure the other side is consistent, for paranoia reasons
+	    cp /boot/extlinux/extlinux.conf.B /tmp/other/boot/extlinux/extlinux.conf.B
+	    cp /boot/extlinux/extlinux.conf.A /tmp/other/boot/extlinux/extlinux.conf.A
+	    umount /tmp/other
+	    rmdir /tmp/other
+	    touch ${RAUC_RUN_ROOT}/BADB
         else
             echo "ERROR: Bad boot" >> ${LOG}
 	    # we have a bad boot situation
@@ -149,10 +182,10 @@ if [ $? == 1 ]; then
 	# boot process so we make sure that happens
         rm -f ${RAUC_RUN_ROOT}/INITIALIZED
     fi
-    echo -n "Reboot after bootloader failure: "
+    echo -n "Reboot after bootloader failure: " >> ${LOG}
     echo `date` >> ${LOG}
     sync
-    reboot
+    reboot -f
 fi
 # Test if system has been initialized for use with RAUC
 if [ ! -f ${RAUC_RUN_ROOT}/INITIALIZED ]; then
@@ -197,7 +230,6 @@ if [ -f ${RAUC_RUN_ROOT}/REBOOTED ]; then
 	ISBBOOTED=$(rauc status | grep "booted" | grep "mmcblk0p2")
 	# 0 if it exists; 1 if it doesn't
 	WASBBOOTED=$([ -f ${RAUC_RUN_ROOT}/BOOTEDB ] ; echo $? )
-	# 0 if it exists; 1 if it doesn't
 	if [ "$ISABOOTED" != "" ] && [ $WASBBOOTED  == 0 ]; then
                 echo "Was B...Now A" >> ${LOG}
 		rm -f ${RAUC_RUN_ROOT}/BOOTEDB
@@ -239,6 +271,18 @@ if [ -f ${RAUC_RUN_ROOT}/REBOOTED ]; then
 	# they should update if you are the master Orin
 	# log the event (success of fail of reboot)
 	rm -f ${RAUC_RUN_ROOT}/REBOOTED
+	# ensure that bad slots are appropriately indicated
+	# 0 if it exists; 1 if it doesn't
+	BADA=$([ -f ${RAUC_RUN_ROOT}/BADA ] ; echo $? )
+	BADB=$([ -f ${RAUC_RUN_ROOT}/BADB ] ; echo $? )
+	if [ $BADA  == 0 ]; then
+	    rauc status mark-bad rootfs.0 >> ${LOG}
+	    rm -f ${RAUC_RUN_ROOT}/BADA
+	fi
+	if [ $BADB  == 0 ]; then
+	    rauc status mark-bad rootfs.1 >> ${LOG}
+	    rm -f ${RAUC_RUN_ROOT}/BADB
+	fi
 fi
 #
 boot_status=$(cat /sys/devices/platform/c360000.pmc/reset_reason | awk '{print $1}')
@@ -259,7 +303,7 @@ if [[ "$boot_status" =~ "WDT" ]]; then
     fi
     touch ${RAUC_RUN_ROOT}/REBOOTED
     sync
-    reboot
+    reboot -f
 fi
 # Proceed along with the normal behavior
 # Here we check the system state and update
@@ -276,6 +320,9 @@ if [ "$ISBBOOTED" != "" ]; then
     rm -f ${RAUC_RUN_ROOT}/BOOTEDA
     rauc status mark-good
 fi
+# report where we are rauc-wise
+echo `date` >> ${LOG}
+rauc status >> ${LOG}
 #
 while  [ 1 ]
 do
