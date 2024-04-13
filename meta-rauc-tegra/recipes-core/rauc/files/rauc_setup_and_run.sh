@@ -1,4 +1,7 @@
 #!/bin/sh
+#
+# Commit: $Id$
+#
 # This script facilitates the RAUC-based update process.
 # The steps are as follows:`
 #
